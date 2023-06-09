@@ -46,8 +46,8 @@ Each weight can be updated as:<br>
 Hence learning rate determines the step size at each iteration when updating the model's parameters during the training process. <br>
 If the learning rate is too high, the algorithm may overshoot the optimal solution, causing it to diverge or oscillate around the optimum. On the other hand, if the learning rate is too low, the algorithm may converge very slowly, requiring many iterations to reach a satisfactory solution.<br>
 
-This XL shows how the parameters are changing with respect to Learning rate. You can change inputs and change initialization of weights and you can play around it.<br>
-![BackPropagation Intuition](./Assets/BackProp_intuition.xlsx)
+You can download below XL.This XL shows how the parameters are changing with respect to Learning rate. You can change inputs and change initialization of weights and you can play around it.<br>
+![BackPropagation Intuition](./Assets/BackProp_intuition.xlsx)<br>
 The image is as below:<br>
 ![BP_Image](./Assets/BackPropXL.PNG)
 
