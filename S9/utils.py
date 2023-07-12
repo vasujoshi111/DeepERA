@@ -4,10 +4,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from model import Net
 
+
 classes_dict = {
     0: "Airplane", 1: "Automobile", 2: "Bird", 3: "Cat", 4:"Deer", 5: "Dog", 6: "Frog", 7: "Horse", 8: "Ship", 9:"Truck"
 }
-def get_train_parameters():
+def get_train_parameters(train_loader, epochs):
     """Function to get the training cretarians.
 
     Returns:
@@ -18,7 +19,17 @@ def get_train_parameters():
     model = Net().to(device) # Set the model to same device.
     
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9) # Initialize the optimizer to SGD with learning rate 0.01 and momentum 0.9.
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.1, verbose=True) # Initialize the scheduler learning rate.
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=4.93E-02,
+        steps_per_epoch=len(train_loader),
+        epochs=epochs,
+        pct_start=5/epochs,
+        div_factor=100,
+        three_phase=False,
+        final_div_factor=100,
+        anneal_strategy='linear'
+    )
     criterion = F.nll_loss # Define the entropy loss function
     
     return model, device, optimizer, scheduler, criterion

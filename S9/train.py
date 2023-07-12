@@ -11,7 +11,7 @@ from tqdm import tqdm
 train_losses = []
 train_acc = []
 
-def train(model, device, train_loader, optimizer, criterion):
+def train(model, device, train_loader, optimizer, criterion, scheduler):
     """Function to train the model.
 
     Args:
@@ -43,6 +43,7 @@ def train(model, device, train_loader, optimizer, criterion):
         # Backpropagation
         loss.backward() # Calculate gradient.
         optimizer.step() # Update weights.
+        scheduler.step() #  Onle cycle policy
 
         correct += GetCorrectPredCount(pred, target) # Get the correct prediction count.
         processed += len(data)
