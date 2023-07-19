@@ -44,11 +44,12 @@ def train(model, device, train_loader, optimizer, criterion, scheduler):
         loss.backward() # Calculate gradient.
         optimizer.step() # Update weights.
         scheduler.step() #  Onle cycle policy
-
+        
         correct += GetCorrectPredCount(pred, target) # Get the correct prediction count.
         processed += len(data)
+        current_lr = optimizer.param_groups[0]['lr']
 
-        pbar.set_description(desc= f'Train: Loss={loss.item():0.4f} Batch_id={batch_idx} Accuracy={100*correct/processed:0.2f}')
+        pbar.set_description(desc= f'Train: LR = {current_lr} Loss={loss.item():0.4f} Batch_id={batch_idx} Accuracy={100*correct/processed:0.2f}')
 
     # Append the accuracy and losses to lists
     train_acc.append(100*correct/processed)
