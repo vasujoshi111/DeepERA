@@ -55,6 +55,6 @@ Batch Size: 512
 
 Number of parameters used: 6,573,130<br>
 Training accuracy: 94.68<br>
-Test accuracy: 90.23<br>
+Test accuracy: 90.67<br>
 
 Able to achieve 90%. The model is overfitting.
