@@ -1,7 +1,7 @@
 # DeepERA
 Learn: Deep learning, Pytorch, Computer Vision, NLP
 
-## S8
+## S10
 **Objective: Train a model with 24 epochs using one cycle policy and get accuacy more than 90% and get intuition of residual blocks.**
 
 Optimizer used: ADAM<br>
