@@ -3,15 +3,8 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import albumentations as A
+from albumentations.pytorch import ToTensorV2
 import numpy as np
-
-
-class CoarseDropout(A.CoarseDropout):
-    def get_params_dependent_on_targets(self, params):
-        if np.any(params['image'].shape[:2] < np.array([self.max_height, self.max_width])):
-            return {'holes': []}
-        return super().get_params_dependent_on_targets(params)
-
 
 # Create custom dataset with Albumentations transformations
 class AlbumentationsDataset(torch.utils.data.Dataset):
@@ -33,35 +26,40 @@ class AlbumentationsDataset(torch.utils.data.Dataset):
 def get_data_loader(batch_size):
     
     # Define the transformations
-    transform = A.Compose([
-        A.HorizontalFlip(p=0.6),
-        A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=15, p=0.5),
-        CoarseDropout(max_holes=1, max_height=16, max_width=16, min_holes=1, min_height=16, min_width=16, fill_value=tuple(np.array([(0.49139968, 0.48215827 ,0.44653124)])), mask_fill_value = None),
-    ])
+    means = [0.4914, 0.4822, 0.4465]
+    stds = [0.2470, 0.2435, 0.2616]
 
-    # Load CIFAR-10 dataset
-    transform_train = transforms.Compose([
-        transforms.ColorJitter(brightness=0.10, contrast=0.1, saturation=0.10, hue=0.1),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.49139968, 0.48215827 ,0.44653124), std=(0.24703233,0.24348505, 0.26158768)),
-    ])
+    transform_train = A.Compose(
+        [
+            A.Normalize(mean=means, std=stds, always_apply=True),
+            A.PadIfNeeded(min_height=36, min_width=36, always_apply=True),
+            # A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2, p=0.5),
+            A.RandomCrop(height=32, width=32, always_apply=True),
+            # A.Flip()
+            A.HorizontalFlip(always_apply=True, p = 1),
+            # A.Resize(32, 32),
+            A.CoarseDropout(max_holes=1, max_height=8, max_width=8, min_holes=1, min_height=8, min_width=8, fill_value=(0.4914, 0.4822, 0.4465), always_apply=True, p=0.5),
+            ToTensorV2(),
+        ]
+    )
 
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.49139968, 0.48215827 ,0.44653124), std=(0.24703233,0.24348505, 0.26158768)),
-    ])
+    transform_test = A.Compose(
+        [
+            A.Normalize(mean=means, std=stds, always_apply=True),
+            ToTensorV2(),
+        ]
+    )
 
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
-
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True)
 
     # Create transformed datasets
-    transformed_trainset = AlbumentationsDataset(trainset, transform)
-    # transformed_testset = AlbumentationsDataset(testset)
+    transformed_trainset = AlbumentationsDataset(trainset, transform_train)
+    transformed_testset = AlbumentationsDataset(testset, transform_test)
 
     # Create data loaders
-    train_loader = torch.utils.data.DataLoader(transformed_trainset, batch_size=128, shuffle=True, num_workers=2)
-    test_loader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False, num_workers=2)
+    train_loader = torch.utils.data.DataLoader(transformed_trainset, batch_size=batch_size, shuffle=True, num_workers=2)
+    test_loader = torch.utils.data.DataLoader(transformed_testset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     return train_loader, test_loader
 
