@@ -1,7 +1,7 @@
 # DeepERA
 Learn: Deep learning, Pytorch, Computer Vision, NLP
 
-## S10
+## S11
 **Objective: Train a model with 20 epochs using one cycle policy and get intuition of resnet 18 and GradCAM**
 
 Optimizer used: ADAM<br>
