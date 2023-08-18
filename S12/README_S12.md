@@ -1,7 +1,7 @@
 # DeepERA
 Learn: Deep learning, Pytorch, Computer Vision, NLP, Pytorch Lightening
 
-## S10
+## S12
 **Objective: Train a model with 24 epochs using one cycle policy**
 
 Optimizer used: ADAM<br>
