@@ -1,7 +1,7 @@
 # DeepERA
 Learn: Deep learning, Pytorch, Computer Vision, NLP, Transformers, Pytorch Lightning
 
-## S20
+## S29
 **Objective: Create a Multimodel GPT(Audio, Text, Image).**
 
 Constraints:
