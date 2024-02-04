@@ -38,4 +38,4 @@ def phase_2():
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('medium')
     phase_1()
-    # phase_2()
+    phase_2()

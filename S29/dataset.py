@@ -4,10 +4,10 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from transformers import AutoProcessor
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 import pickle
 import requests
-from datasets import Dataset, load_dataset
+from datasets import load_dataset
 import pandas as pd
 import numpy as np
 
@@ -25,9 +25,12 @@ class ClipDataset(Dataset):
     return len(self.caption_dataset)
 
   def __getitem__(self, idx):
+    # print("idx", idx)
     #Get the image url and caption
     img_url = self.caption_dataset[idx]["image_url"]
     caption = self.caption_dataset[idx]["caption"]
+    # print("img_url", img_url)
+    # print("caption", caption)
 
     #Get the image and caption embeddings
     image = Image.open(requests.get(img_url,stream=True).raw)
@@ -41,6 +44,7 @@ class ClipDataset(Dataset):
     image_sqeezed = image_processed.squeeze(0)
     tokenized_caption = self.tokenizer(caption, return_tensors="pt", return_attention_mask=False)
     tokenized_caption_ids = tokenized_caption['input_ids'].squeeze(0)
+    # print(image_sqeezed.shape, tokenized_caption_ids.shape)
     return(image_sqeezed , tokenized_caption_ids)
   
 
@@ -73,30 +77,25 @@ def get_data_loaders_phase1(data_dir, clip_model_name, tokenizer, train_batch_si
   
 class ClipDatasetPhase2(Dataset):
   '''ClipDataset class for loading the CLIP dataset'''
-  def __init__(self, data_frame, model_name, tokenizer):
+  def __init__(self, data_pkl, model_name, tokenizer):
 
     self.tokenizer  = tokenizer
     self.processor  = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-    self.df = data_frame
+    self.qa_data = data_pkl
       
   def __len__(self):
     #Return the length of the dataset
-    return len(self.df)
+    return len(self.qa_data)
 
   def __getitem__(self, idx):
     #Get the image url and QAs
-    img_url = self.df.ImageUrl[idx[0]]
-    que = self.df.Question[idx[0]]
-    ans = self.df.Answer[idx[0]]
-
-    print("img_url", img_url)
-    print("que", que)
-    print("ans", ans)
+    img_url = self.qa_data[idx].get("ImageUrl")
+    que = self.qa_data[idx].get("Question")
+    ans = self.qa_data[idx].get("Answer")
 
     #Get the image and caption embeddings
-    if img_url is None:
-        print("img_url is None")
-        image_sqeezed = None
+    if str(img_url)=='0':
+        image_sqeezed = torch.zeros(3,224,224)
     else:
         image = Image.open(requests.get(img_url,stream=True).raw)
         width, height = image.size
@@ -116,10 +115,7 @@ def collate_fn_phase2(batch):
     #Unzip the batch
     image_embeddings, ques, ans = zip(*batch)
     #Stack the image embeddings
-    if image_embeddings[0] is None:
-        image_embeddings_stacked = None
-    else:
-        image_embeddings_stacked = torch.stack(image_embeddings, dim=0)
+    image_embeddings_stacked = torch.stack(image_embeddings, dim=0)
     #Pad the QAs, padded value is the <eos> token
     ques_padded = torch.nn.utils.rnn.pad_sequence(ques, batch_first=True, padding_value=50256)
     ans_padded = torch.nn.utils.rnn.pad_sequence(ans, batch_first=True, padding_value=50256)
@@ -191,14 +187,14 @@ def get_oas_df(config):
 
 def get_data_loaders_phase2(tokenizer, config):
 
-    train_i150k, test_i150k = get_i150_df(config)
-    train_oas, test_oas = get_oas_df(config)
-
-    train_df = pd.concat([train_i150k, train_oas]).reset_index(drop=True)
-    val_df = pd.concat([test_i150k, test_oas]).reset_index(drop=True)
+     # Load the data
+    with open(os.path.join(config.get("data_dir"), 'train.pkl'), 'rb') as fp: 
+        train_pkl = pickle.load(fp)
+    with open(os.path.join(config.get("data_dir"), "val.pkl"), "rb") as fp:
+        val_pkl = pickle.load(fp)
    # train data loaders
-    train_dataloader = DataLoader(ClipDatasetPhase2(train_df, config.get("clip_model_name"), tokenizer), collate_fn=collate_fn_phase2, batch_size=config.get("train_batch_size"), num_workers = config.get("num_workers"), shuffle=True, pin_memory=True)
+    train_dataloader = DataLoader(ClipDatasetPhase2(train_pkl, config.get("clip_model_name"), tokenizer), collate_fn=collate_fn_phase2, batch_size=config.get("train_batch_size"), num_workers = config.get("num_workers"), shuffle=True, pin_memory=False)
 
     # val data loaders
-    val_dataloader   = DataLoader(ClipDatasetPhase2(val_df, config.get("clip_model_name"), tokenizer), collate_fn=collate_fn_phase2, batch_size=config.get("val_batch_size"), num_workers = config.get("num_workers"), shuffle=False, pin_memory=True)
+    val_dataloader   = DataLoader(ClipDatasetPhase2(val_pkl, config.get("clip_model_name"), tokenizer), collate_fn=collate_fn_phase2, batch_size=config.get("val_batch_size"), num_workers = config.get("num_workers"), shuffle=False, pin_memory=False)
     return train_dataloader, val_dataloader

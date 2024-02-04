@@ -69,6 +69,7 @@ class CustomClipPhi2(nn.Module):
 
         batch_size    = target_captions.size()[0]
         target_length = target_captions.size()[1]
+        print("---", target_length)
 
         # clip model output for image
         clip_outputs = self.clip_model(**images) # See this for loading https://huggingface.co/openai/clip-vit-base-patch36
@@ -166,6 +167,7 @@ def train_model_phase1(model, train_loader, val_dataloader, optimizer, tokenizer
                     if (step%1000==0):
                         torch.save(model.projection_layer.state_dict(), './ckpts/model_phase1.pth')
                 except Exception as e:
+                    print(e)
                     continue
                  
             # # save model
@@ -176,6 +178,7 @@ def train_model_phase1(model, train_loader, val_dataloader, optimizer, tokenizer
             torch.save(model.projection_layer.state_dict(), './ckpts/model_phase1.pth')
 
         except Exception as e:
+            print(e)
             continue
 
 
@@ -227,7 +230,6 @@ class MainQLoraModel(nn.Module):
         self.phi2_model = peft.get_peft_model(phi2_model, peft_config).to(config.get("device"))
 
         self.EOS_TOKEN_ID    = self.tokenizer.eos_token_id
-        self.IMAGE_TOKEN_ID  = 23903 # token for Comments
         self.clip_embed      = config.get("clip_embed")
         self.phi_embed       = config.get("phi_embed")        
 
@@ -250,49 +252,137 @@ class MainQLoraModel(nn.Module):
             self.projection_layer.load_state_dict(torch.load('./ckpts/model_phase1.pth', map_location=config.get("device")))
 
 
+    def generate(self, tokenizer, config, images = None, ques = None, max_tokens = 100):
+        batch_size = 1
+
+        predicted_caption = torch.full((batch_size, max_tokens), self.EOS_TOKEN_ID, dtype=torch.long, device=self.config.get('device'))
+        start_iq = self.tokenizer.encode("<iQ>")
+        end_iq = self.tokenizer.encode("</iQ>")
+        start_iq_embeds = torch.tensor(start_iq).repeat(batch_size, 1)
+        end_iq_embeds = torch.tensor(end_iq).repeat(batch_size, 1)
+        start_iq_embeds = self.phi2_model.model.model.embed_tokens(start_iq_embeds.to(self.config.get("device")))
+        end_iq_embeds = self.phi2_model.model.model.embed_tokens(end_iq_embeds.to(self.config.get("device")))
+        questions_embed  = self.phi2_model.model.model.embed_tokens(ques)
+        if images is not None:
+            clip_outputs = self.clip_model(**images)
+            # remove cls token
+            images = clip_outputs.last_hidden_state[:, 1:, :]
+            image_embeddings = self.projection_layer(images).to(torch.float16)
+            combined_embeds  = torch.cat([start_iq_embeds, image_embeddings, questions_embed, end_iq_embeds], dim=1)
+        else:
+            combined_embeds = torch.cat([start_iq_embeds, questions_embed, end_iq_embeds], dim=1)
+
+        for pos in range(max_tokens - 1):
+            model_output_logits = self.phi2_model.forward(inputs_embeds = combined_embeds)['logits']
+            predicted_word_token_logits = model_output_logits[:, -1, :].unsqueeze(1)
+            predicted_word_token = torch.argmax(predicted_word_token_logits, dim = -1)
+            predicted_caption[:, pos] = predicted_word_token.view(1,-1).to('cpu')
+            next_token_embeds = self.phi2_model.model.embed_tokens(predicted_word_token)
+            combined_embeds   = torch.cat([combined_embeds, next_token_embeds], dim=1)
+        return predicted_caption
+
+
     def forward(self, images, ques, ans):
 
         batch_size = ques.size()[0]
         questions  = ques.to(self.config.get("device"))
         answers    = ans.to(self.config.get("device"))
+        target_length = ans.size()[1]
+        start_iq = self.tokenizer.encode("<iQ>")
+        end_iq = self.tokenizer.encode("</iQ>")
+        start_iq_embeds = torch.tensor(start_iq).repeat(batch_size, 1)
+        end_iq_embeds = torch.tensor(end_iq).repeat(batch_size, 1)
+        start_iq_embeds = self.phi2_model.model.model.embed_tokens(start_iq_embeds.to(self.config.get("device")))
+        end_iq_embeds = self.phi2_model.model.model.embed_tokens(end_iq_embeds.to(self.config.get("device")))
 
-        questions_embed  = peft_model.model.model.embed_tokens(questions)
-        if images is None:
-            combined_embeds = questions_embed
+        questions_embed  = self.phi2_model.model.model.embed_tokens(questions)
+        answers_embed    = self.phi2_model.model.model.embed_tokens(answers)
+
+        are_all_zeros = torch.all(images == 0).item()
+        if are_all_zeros:
+            combined_embeds = torch.cat([start_iq_embeds, questions_embed, end_iq_embeds], dim=1) 
         else:
             images = {'pixel_values': images.to(self.config.get("device"))}
-            clip_outputs  = clip_model(**images)
+            clip_outputs  = self.clip_model(**images)
             images_embeds = clip_outputs.last_hidden_state[:,1:,:] # remove cls token
             
             # projection
-            image_embeds  = projection(images_embeds).to(torch.float16)
-            img_token_tensor = torch.tensor(self.IMAGE_TOKEN_ID).repeat(batch_size, 1).to(self.config.get("device"))
-            img_token_embeds = peft_model.model.model.embed_tokens(img_token_tensor)
-            combined_embeds = torch.cat([image_embeds, img_token_embeds, questions_embed], dim=1) 
+            image_embeds  = self.projection_layer(images_embeds).to(torch.float16)
+            combined_embeds = torch.cat([start_iq_embeds, image_embeds, questions_embed, end_iq_embeds], dim=1) 
         
-        phi_output_logits = peft_model(inputs_embeds=combined_embeds)['logits']
+        
+        # # for loss
+        loss = 0
+        for pos in range(target_length - 1):
+            model_output_logits = self.phi2_model.forward(inputs_embeds = combined_embeds)['logits']
+            predicted_word_token_logits = model_output_logits[:, -1, :].unsqueeze(1)
+            pos_loss = cross_entropy(predicted_word_token_logits.view(-1,predicted_word_token_logits.size(-1)), answers[:, pos].contiguous().view(-1), ignore_index=self.EOS_TOKEN_ID,label_smoothing=0.1)
+            predicted_word_token = torch.argmax(predicted_word_token_logits, dim=-1)
+            next_token_embeds = self.phi2_model.model.model.embed_tokens(predicted_word_token) 
+            combined_embeds   = torch.cat([combined_embeds, next_token_embeds], dim=1)
+            del model_output_logits
+            torch.cuda.empty_cache()
+            loss += pos_loss
+        loss = loss / target_length
 
-        if images is not None:
-            # remove image and image token embeddings
-            phi_output_logits = phi_output_logits[:,images_embeds.shape[1] + 2 : ,:]
-        
-        phi_output_logits = phi_output_logits.reshape(-1, self.config.get("vocab_size"))
-        
-        loss = cross_entropy(phi_output_logits, answers.contiguous().view(-1), ignore_index=self.EOS_TOKEN_ID, label_smoothing=0.1)
-
+        # Delete variables to free up memory
+        del combined_embeds        
         return loss
+
+    # def forward(self, images, ques, ans):
+
+    #     batch_size = ques.size()[0]
+    #     questions  = ques.to(self.config.get("device"))
+    #     answers    = ans.to(self.config.get("device"))
+    #     target_length = ans.size()[1]
+    #     start_iq = self.tokenizer.encode("<iQ>")
+    #     end_iq = self.tokenizer.encode("</iQ>")
+    #     start_iq_embeds = torch.tensor(start_iq).repeat(batch_size, 1)
+    #     end_iq_embeds = torch.tensor(end_iq).repeat(batch_size, 1)
+    #     start_iq_embeds = self.phi2_model.model.model.embed_tokens(start_iq_embeds.to(self.config.get("device")))
+    #     end_iq_embeds = self.phi2_model.model.model.embed_tokens(end_iq_embeds.to(self.config.get("device")))
+
+    #     questions_embed  = self.phi2_model.model.model.embed_tokens(questions)
+    #     answers_embed    = self.phi2_model.model.model.embed_tokens(answers)
+
+    #     are_all_zeros = torch.all(images == 0).item()
+    #     if are_all_zeros:
+    #         combined_embeds = torch.cat([start_iq_embeds, questions_embed, end_iq_embeds, answers_embed], dim=1) 
+    #     else:
+    #         images = {'pixel_values': images.to(self.config.get("device"))}
+    #         clip_outputs  = self.clip_model(**images)
+    #         images_embeds = clip_outputs.last_hidden_state[:,1:,:] # remove cls token
+            
+    #         # projection
+    #         image_embeds  = self.projection_layer(images_embeds).to(torch.float16)
+    #         combined_embeds = torch.cat([start_iq_embeds, image_embeds, questions_embed, end_iq_embeds, answers_embed], dim=1) 
+        
+    #     model_output_logits = self.phi2_model.forward(inputs_embeds = combined_embeds)['logits']
+    #     # # for loss
+    #     loss = 0
+    #     for pos in range(target_length - 1):
+    #         predicted_word_token_logits = model_output_logits[:, -1, :].unsqueeze(1)
+    #         pos_loss = cross_entropy(predicted_word_token_logits.view(-1,predicted_word_token_logits.size(-1)), answers[:, pos].contiguous().view(-1), ignore_index=self.EOS_TOKEN_ID,label_smoothing=0.1)
+    #         loss += pos_loss
+    #     loss = loss / target_length
+
+    #     # Delete variables to free up memory
+    #     del combined_embeds
+    #     del model_output_logits
+    #     torch.cuda.empty_cache()
+    #     return loss
 
 def validate_model_phase2(model, val_dataloader, tokenizer, config):
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        try:
-            for images, ques, ans in tqdm(val_dataloader):
-                loss = model(images, ques, ans)
-                total_loss+=loss.item()
-            print(f"Validation Loss: {total_loss/len(val_dataloader)}")
-        except Exception as e:
-            pass
+        # try:
+        for images, ques, ans in tqdm(val_dataloader):
+            loss = model(images, ques, ans)
+            total_loss+=loss.item()
+        print(f"Validation Loss: {total_loss/len(val_dataloader)}")
+        # except Exception as e:
+        #     pass
     model.train()
 
 
@@ -310,7 +400,6 @@ def train_model_phase2(model, train_loader, val_dataloader, tokenizer, config):
         try:
             for idx, (images, ques, ans) in enumerate(pbar):
                 try:
-                    print("hi")
                     phi2_optim.zero_grad()
                     proj_optim.zero_grad()
                     loss = model(images, ques, ans)
@@ -324,7 +413,7 @@ def train_model_phase2(model, train_loader, val_dataloader, tokenizer, config):
                         torch.save(model.projection_layer.state_dict(), './ckpts/model_phase2.pth')
                         model.phi2_model.save_pretrained('./ckpts/Qlora_adaptor/', save_adapter=True, save_config=True)
                 except Exception as e:
-                    print(e)
+                    print("in frp",e)
                     continue
                  
             validate_model_phase2(model, val_dataloader, tokenizer, config)
