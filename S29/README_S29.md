@@ -36,4 +36,5 @@ Completed both phase 1 and 2, which took 4 days(3 + 1) on 48GB GPU on RTX6000Ada
 Trained only for 20k steps in pahse 1 and 6k steps in pahse 2 due to time contraints.
 
 We can play with the results:
+
 Huggingface App: https://huggingface.co/spaces/Vasudevakrishna/TAI2T_Multimodel
