@@ -33,7 +33,7 @@ The task is devided into 2. Please go through below:
 ![Capstone](./capstone.jpg)
 
 Completed both phase 1 and 2, which took 4 days(3 + 1) on 48GB GPU on RTX6000Ada(128GB RAM). Results are quite good. 
-Trained only for 20k steps in pahse 1 and 6k steps in pahse 2 due to time contraints.
+Trained only for 20k steps in phase 1 and 6k steps in phase 2 due to time contraints.
 
 We can play with the results:
 
